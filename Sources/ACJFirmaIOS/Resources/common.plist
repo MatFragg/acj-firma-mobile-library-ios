@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>app.url.tsl</key>
+    <string>https://iofe.indecopi.gob.pe/TSL/tsl-pe.xml</string>
+    <key>app.url.tsl.alterno</key>
+    <string>https://iofe.indecopi.gob.pe/TSL/tsl-pe.xml</string>
+    <key>app.url.tsa</key>
+    <string>http://tsa.indecopi.gob.pe/sign</string>
+    <key>app.url.tsa.alterno</key>
+    <string></string>
+    <key>app.tsa.user</key>
+    <string></string>
+    <key>app.tsa.password</key>
+    <string></string>
+</dict>
+</plist>
