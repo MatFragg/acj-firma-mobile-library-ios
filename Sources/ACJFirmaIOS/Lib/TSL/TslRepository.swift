@@ -21,9 +21,10 @@ public class TslRepository {
         let cacheDir = try cacheDirectory()
         let cacheFile = cacheDir.appendingPathComponent(cacheFileName)
 
+        let modDate = (try? FileManager.default.attributesOfItem(atPath: cacheFile.path)[.modificationDate] as? Date) ?? .distantPast
         let debeDescargar = expiration <= 0
             || !FileManager.default.fileExists(atPath: cacheFile.path)
-            || (Date().timeIntervalSince(try FileManager.default.attributesOfItem(atPath: cacheFile.path)[.modificationDate] as? Date ?? .distantPast) > expiration)
+            || (Date().timeIntervalSince(modDate) > expiration)
 
         if !debeDescargar {
             LogManager.info("Usando TSL en caché: \(cacheFile.path)")
