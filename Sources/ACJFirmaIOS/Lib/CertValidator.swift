@@ -223,7 +223,7 @@ public class CertValidator {
 
         let subject = X509_get_subject_name(x509)
         var buf = [Int8](repeating: 0, count: 256)
-        _ = X509_NAME_oneline(subject, &buf, buf.count)
+        _ = X509_NAME_oneline(subject, &buf, Int32(buf.count))
         return String(cString: buf)
     }
 
@@ -243,7 +243,7 @@ public class CertValidator {
 
         let issuer = X509_get_issuer_name(x509)
         var buf = [Int8](repeating: 0, count: 256)
-        _ = X509_NAME_oneline(issuer, &buf, buf.count)
+        _ = X509_NAME_oneline(issuer, &buf, Int32(buf.count))
         return String(cString: buf)
     }
 
@@ -320,7 +320,7 @@ public class CertValidator {
 
             // Serialize ACCESS_DESCRIPTION to DER, scan for IA5String URIs
             var adDER: UnsafeMutablePointer<UInt8>?
-            let adLen = i2d_ACCESS_DESCRIPTION(ad, &adDER)
+            let adLen = i2d_ACCESS_DESCRIPTION(UnsafePointer<ACCESS_DESCRIPTION>(ad), &adDER)
             guard adLen > 0, let adPtr = adDER else { continue }
             let adData = Data(bytes: adPtr, count: Int(adLen))
             free(adPtr)

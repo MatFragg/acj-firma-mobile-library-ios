@@ -279,7 +279,7 @@ public class CRLClient {
             guard let dpRaw = OPENSSL_sk_value(ext, Int32(i)) else { continue }
             let dp = OpaquePointer(dpRaw)
             var dpDER: UnsafeMutablePointer<UInt8>?
-            let dpLen = i2d_DIST_POINT(dp, &dpDER)
+            let dpLen = i2d_DIST_POINT(UnsafePointer<DIST_POINT>(dp), &dpDER)
             guard dpLen > 0, let dpPtr = dpDER else { continue }
             let dpData = Data(bytes: dpPtr, count: Int(dpLen))
             free(dpPtr)

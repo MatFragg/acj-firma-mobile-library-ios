@@ -105,7 +105,7 @@ public class OCSPClient {
     private static func parseOcspResponse(_ data: Data, issuer: SecCertificate, cert: SecCertificate) throws {
         guard let resp = data.withUnsafeBytes({ (ptr: UnsafeRawBufferPointer) -> OpaquePointer? in
             guard let base = ptr.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return nil }
-            var roPtr = base
+            var roPtr: UnsafePointer<UInt8>? = base
             return d2i_OCSP_RESPONSE(nil, &roPtr, ptr.count)
         }) else {
             throw NSError(domain: "OCSPClient", code: -1,
@@ -178,7 +178,7 @@ public class OCSPClient {
             let ad = OpaquePointer(adRaw)
 
             var adDER: UnsafeMutablePointer<UInt8>?
-            let adLen = i2d_ACCESS_DESCRIPTION(ad, &adDER)
+            let adLen = i2d_ACCESS_DESCRIPTION(UnsafePointer<ACCESS_DESCRIPTION>(ad), &adDER)
             guard adLen > 0, let adPtr = adDER else { continue }
             let adData = Data(bytes: adPtr, count: Int(adLen))
             free(adPtr)

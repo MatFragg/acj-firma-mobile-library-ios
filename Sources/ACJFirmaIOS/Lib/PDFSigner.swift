@@ -184,33 +184,44 @@ public class PDFSigner {
         imageData: Data,
         params: Parameters
     ) throws -> Data {
-        guard let document = PDFDocument(data: pdfData),
-              let page = document.page(at: params.pagina - 1) else {
+        guard let sourcePDF = CGDataProvider(data: pdfData as CFData),
+              let cgDocument = CGPDFDocument(sourcePDF) else {
             throw NSError(domain: "PDFSigner", code: -1,
                 userInfo: [NSLocalizedDescriptionKey: "Error cargando PDF para anotación"])
         }
 
-        guard let image = UIImage(data: imageData) else {
+        guard let image = UIImage(data: imageData), let cgImage = image.cgImage else {
             throw NSError(domain: "PDFSigner", code: -1,
                 userInfo: [NSLocalizedDescriptionKey: "Error creando imagen de sello"])
         }
 
-        let imageBounds = CGRect(
-            x: CGFloat(params.x),
-            y: page.bounds(for: .mediaBox).height - CGFloat(params.y) - CGFloat(params.height),
-            width: CGFloat(params.width),
-            height: CGFloat(params.height)
-        )
+        var outputData = Data()
+        let pageCount = cgDocument.numberOfPages
+        let signPageNum = params.pagina
 
-        let props: [PDFAnnotationKey: Any] = [.image: image]
-        let annotation = PDFAnnotation(bounds: imageBounds, forType: .stamp, withProperties: props)
-        annotation.shouldDisplay = true
-        page.addAnnotation(annotation)
+        UIGraphicsBeginPDFContextToData(&outputData, cgDocument.page(at: 1)!.getBoxRect(.mediaBox), nil)
+        defer { UIGraphicsEndPDFContext() }
 
-        guard let outputData = document.dataRepresentation() else {
-            throw NSError(domain: "PDFSigner", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Error guardando PDF con anotación"])
+        for pageNum in 1...pageCount {
+            guard let page = cgDocument.page(at: pageNum) else { continue }
+            let pageRect = page.getBoxRect(.mediaBox)
+
+            if pageNum == signPageNum {
+                UIGraphicsBeginPDFPageWithInfo(pageRect, nil)
+                guard let ctx = UIGraphicsGetCurrentContext() else { continue }
+                ctx.drawPDFPage(page)
+                let imageY = pageRect.height - CGFloat(params.y) - CGFloat(params.height)
+                ctx.saveGState()
+                ctx.translateBy(x: CGFloat(params.x), y: imageY)
+                ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: CGFloat(params.width), height: CGFloat(params.height)))
+                ctx.restoreGState()
+            } else {
+                UIGraphicsBeginPDFPageWithInfo(pageRect, nil)
+                guard let ctx = UIGraphicsGetCurrentContext() else { continue }
+                ctx.drawPDFPage(page)
+            }
         }
+
         return outputData
     }
 }
