@@ -222,6 +222,6 @@ public class PDFSigner {
             }
         }
 
-        return outputData
+        return outputData as Data
     }
 }
