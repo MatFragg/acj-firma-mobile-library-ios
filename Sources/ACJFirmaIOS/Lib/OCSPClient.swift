@@ -125,7 +125,6 @@ public class OCSPClient {
         }
         defer { OCSP_BASICRESP_free(basicResp) }
 
-        var count: Int32 = 0
         let singleResps = OCSP_resp_count(basicResp)
         guard singleResps > 0 else {
             throw NSError(domain: "OCSPClient", code: -1,

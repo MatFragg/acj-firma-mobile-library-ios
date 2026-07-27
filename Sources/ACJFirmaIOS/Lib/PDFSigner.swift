@@ -195,11 +195,11 @@ public class PDFSigner {
                 userInfo: [NSLocalizedDescriptionKey: "Error creando imagen de sello"])
         }
 
-        var outputData = Data()
+        let outputData = NSMutableData()
         let pageCount = cgDocument.numberOfPages
         let signPageNum = params.pagina
 
-        UIGraphicsBeginPDFContextToData(&outputData, cgDocument.page(at: 1)!.getBoxRect(.mediaBox), nil)
+        UIGraphicsBeginPDFContextToData(outputData, cgDocument.page(at: 1)!.getBoxRect(.mediaBox), nil)
         defer { UIGraphicsEndPDFContext() }
 
         for pageNum in 1...pageCount {
