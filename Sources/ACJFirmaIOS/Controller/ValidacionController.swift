@@ -45,7 +45,7 @@ public class ResultadoValidacion {
 public class ValidacionController {
 
     public static func validarDocumento(pdfData: Data, tsl: TslService) -> ResultadoValidacion {
-        guard let document = PDFDocument(data: pdfData) else {
+        guard PDFDocument(data: pdfData) != nil else {
             return ResultadoValidacion(documentoValido: false, firmas: [],
                 mensajeError: "No se pudo cargar el PDF")
         }
@@ -236,7 +236,7 @@ public class ValidacionController {
         let certCount = OPENSSL_sk_num(certStack)
         var certChain: [SecCertificate] = []
         for i in 0..<certCount {
-            guard let raw = OPENSSL_sk_value(certStack, i) else { continue }
+            guard let raw = OPENSSL_sk_value(certStack, Int32(i)) else { continue }
             let x509 = OpaquePointer(raw)
             var out: UnsafeMutablePointer<UInt8>?
             let len = i2d_X509(x509, &out)

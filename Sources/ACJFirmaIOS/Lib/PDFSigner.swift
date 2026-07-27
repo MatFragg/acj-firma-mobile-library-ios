@@ -202,10 +202,12 @@ public class PDFSigner {
             height: CGFloat(params.height)
         )
 
-        let annotation = PDFAnnotation(image: image, bounds: imageBounds, properties: nil)
+        let props: [PDFAnnotationKey: Any] = [.image: image]
+        let annotation = PDFAnnotation(bounds: imageBounds, forType: .stamp, withProperties: props)
+        annotation.shouldDisplay = true
         page.addAnnotation(annotation)
 
-        guard let outputData = document.dataRepresentation else {
+        guard let outputData = document.dataRepresentation() else {
             throw NSError(domain: "PDFSigner", code: -1,
                 userInfo: [NSLocalizedDescriptionKey: "Error guardando PDF con anotación"])
         }

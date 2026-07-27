@@ -78,8 +78,9 @@ public class CertValidator {
 
     private static func dateFromASN1_TIME(_ time: OpaquePointer?) -> Date? {
         guard let t = time else { return nil }
+        let asn1StrPtr = UnsafePointer<ASN1_STRING>(t)
         var dataPtr: UnsafeMutablePointer<UInt8>?
-        let len = ASN1_STRING_to_UTF8(&dataPtr, t)
+        let len = ASN1_STRING_to_UTF8(&dataPtr, asn1StrPtr)
         guard len > 0, let ptr = dataPtr else { return nil }
         let str = String(cString: ptr)
         free(ptr)
@@ -221,12 +222,9 @@ public class CertValidator {
         defer { X509_free(x509) }
 
         let subject = X509_get_subject_name(x509)
-        var out: UnsafeMutablePointer<Int8>?
-        let len = X509_NAME_oneline(subject, &out, 0)
-        guard len > 0, let ptr = out else { return "" }
-        let result = String(cString: ptr)
-        free(ptr)
-        return result
+        var buf = [Int8](repeating: 0, count: 256)
+        _ = X509_NAME_oneline(subject, &buf, buf.count)
+        return String(cString: buf)
     }
 
     private static func getIssuerDN(_ cert: SecCertificate) -> String {
@@ -244,12 +242,9 @@ public class CertValidator {
         defer { X509_free(x509) }
 
         let issuer = X509_get_issuer_name(x509)
-        var out: UnsafeMutablePointer<Int8>?
-        let len = X509_NAME_oneline(issuer, &out, 0)
-        guard len > 0, let ptr = out else { return "" }
-        let result = String(cString: ptr)
-        free(ptr)
-        return result
+        var buf = [Int8](repeating: 0, count: 256)
+        _ = X509_NAME_oneline(issuer, &buf, buf.count)
+        return String(cString: buf)
     }
 
     private static func verificarFirma(cert: SecCertificate, issuer: SecCertificate) -> Bool {
@@ -320,7 +315,7 @@ public class CertValidator {
 
         let count = Int(OPENSSL_sk_num(aia))
         for i in 0..<count {
-            guard let adRaw = OPENSSL_sk_value(aia, i) else { continue }
+            guard let adRaw = OPENSSL_sk_value(aia, Int32(i)) else { continue }
             let ad = OpaquePointer(adRaw)
 
             // Serialize ACCESS_DESCRIPTION to DER, scan for IA5String URIs

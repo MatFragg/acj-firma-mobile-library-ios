@@ -47,12 +47,13 @@ public class CRLClient {
                 }
                 if let crl = d2i_X509_CRL_bio(bio, nil) {
                     defer { X509_CRL_free(crl) }
-                    guard let nextUpdate = X509_CRL_get0_nextUpdate(crl) else { break }
-                    let now = Date()
-                    let nextOpaque = OpaquePointer(nextUpdate)
-                    if let next = dateFromASN1_TIME(nextOpaque), now < next {
-                        LogManager.info("Usando CRL en caché: \(cacheFile.lastPathComponent)")
-                        return crlData
+                    if let nextUpdate = X509_CRL_get0_nextUpdate(crl) {
+                        let now = Date()
+                        let nextOpaque = OpaquePointer(nextUpdate)
+                        if let next = dateFromASN1_TIME(nextOpaque), now < next {
+                            LogManager.info("Usando CRL en caché: \(cacheFile.lastPathComponent)")
+                            return crlData
+                        }
                     }
                 }
                 try? FileManager.default.removeItem(at: cacheFile)
@@ -275,7 +276,7 @@ public class CRLClient {
         // Serialize each DIST_POINT to DER, then scan for IA5String URIs
         let count = Int(OPENSSL_sk_num(ext))
         for i in 0..<count {
-            guard let dpRaw = OPENSSL_sk_value(ext, i) else { continue }
+            guard let dpRaw = OPENSSL_sk_value(ext, Int32(i)) else { continue }
             let dp = OpaquePointer(dpRaw)
             var dpDER: UnsafeMutablePointer<UInt8>?
             let dpLen = i2d_DIST_POINT(dp, &dpDER)
@@ -320,8 +321,9 @@ public class CRLClient {
 
     private static func dateFromASN1_TIME(_ time: OpaquePointer?) -> Date? {
         guard let t = time else { return nil }
+        let asn1StrPtr = UnsafePointer<ASN1_STRING>(t)
         var dataPtr: UnsafeMutablePointer<UInt8>?
-        let len = ASN1_STRING_to_UTF8(&dataPtr, t)
+        let len = ASN1_STRING_to_UTF8(&dataPtr, asn1StrPtr)
         guard len > 0, let ptr = dataPtr else { return nil }
         let str = String(cString: ptr)
         free(ptr)

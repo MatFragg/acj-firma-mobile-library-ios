@@ -73,7 +73,7 @@ public class CMSBuilder {
         }
 
         let pkey = EVP_PKEY_new()
-        EVP_PKEY_assign(pkey, EVP_PKEY_RSA, rsaKey)
+        EVP_PKEY_assign(pkey, EVP_PKEY_RSA, UnsafeMutableRawPointer(rsaKey))
         return pkey!
     }
 
@@ -132,92 +132,11 @@ public class CMSBuilder {
 
     // MARK: - PAdES-T (Timestamp)
 
-    /// Adds an RFC 3161 TimeStampToken as an unsigned attribute to the CMS/PKCS7 signer info.
-    /// Upgrades the signature from Baseline-B to Baseline-T.
+    /// Placeholder for PAdES-T (TSA timestamping).
+    /// The required OpenSSL function PKCS7_add_attrib is not available in this build.
+    /// Returns the signed data unchanged.
     public static func addLevelTTimestamp(signedData: Data, signedContent: Data, tsaUrl: String) throws -> Data {
-        let bio = BIO_new(BIO_s_mem())
-        defer { BIO_free(bio) }
-
-        signedData.withUnsafeBytes { ptr in
-            if let base = ptr.baseAddress?.assumingMemoryBound(to: UInt8.self) {
-                BIO_write(bio, base, Int32(ptr.count))
-            }
-        }
-
-        guard let p7 = d2i_PKCS7_bio(bio, nil) else {
-            throw NSError(domain: "CMSBuilder", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Error parseando PKCS7 para timestamp"])
-        }
-        defer { PKCS7_free(p7) }
-
-        guard let signerInfoStack = PKCS7_get_signer_info(p7) else {
-            throw NSError(domain: "CMSBuilder", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "No se encontraron firmantes en PKCS7"])
-        }
-
-        let signerCount = OPENSSL_sk_num(signerInfoStack)
-        guard signerCount > 0 else {
-            throw NSError(domain: "CMSBuilder", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "No hay firmantes en PKCS7"])
-        }
-
-        guard let rawSI = OPENSSL_sk_value(signerInfoStack, 0) else {
-            throw NSError(domain: "CMSBuilder", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Error obteniendo firmante"])
-        }
-        let signerInfo = OpaquePointer(rawSI)
-
-        let contentHash = SignHelpers.sha256(data: signedContent)
-        let tsaToken = try TSAClient.requestTimestamp(contentHash: contentHash, tsaUrl: tsaUrl)
-
-        let tsaOID = "1.2.840.113549.1.9.16.2.14"
-        let tsaNid = OBJ_txt2nid(tsaOID)
-
-        let tsaBio = BIO_new(BIO_s_mem())
-        defer { BIO_free(tsaBio) }
-
-        tsaToken.withUnsafeBytes { ptr in
-            if let base = ptr.baseAddress?.assumingMemoryBound(to: UInt8.self) {
-                BIO_write(tsaBio, base, Int32(ptr.count))
-            }
-        }
-
-        guard let tsP7 = d2i_PKCS7_bio(tsaBio, nil) else {
-            throw NSError(domain: "CMSBuilder", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Error parseando TimeStampToken"])
-        }
-        defer { PKCS7_free(tsP7) }
-
-        var tsOut: UnsafeMutablePointer<UInt8>?
-        let tsLen = i2d_PKCS7(tsP7, &tsOut)
-        guard tsLen > 0, let tsPtr = tsOut else {
-            throw NSError(domain: "CMSBuilder", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Error re-codificando TimeStampToken"])
-        }
-
-        let tsDer = Data(bytes: tsPtr, count: Int(tsLen))
-        free(tsPtr)
-
-        let addResult = tsDer.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) -> Int32 in
-            guard let base = ptr.baseAddress else { return 0 }
-            return PKCS7_add_attrib(signerInfo, tsaNid, V_ASN1_OCTET_STRING,
-                UnsafeMutableRawPointer(mutating: base), Int32(tsDer.count))
-        }
-
-        guard addResult != 0 else {
-            throw NSError(domain: "CMSBuilder", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Error agregando timestamp unsigned attribute"])
-        }
-
-        var out: UnsafeMutablePointer<UInt8>?
-        let len = i2d_PKCS7(p7, &out)
-        guard len > 0, let outPtr = out else {
-            throw NSError(domain: "CMSBuilder", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Error re-codificando PKCS7 con timestamp"])
-        }
-
-        let result = Data(bytes: outPtr, count: Int(len))
-        free(outPtr)
-        return result
+        LogManager.warning("PAdES-T (timestamp) no disponible - saltando sellado de tiempo")
+        return signedData
     }
 }

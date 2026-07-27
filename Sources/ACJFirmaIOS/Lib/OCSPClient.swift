@@ -103,16 +103,11 @@ public class OCSPClient {
     }
 
     private static func parseOcspResponse(_ data: Data, issuer: SecCertificate, cert: SecCertificate) throws {
-        let bio = BIO_new(BIO_s_mem())
-        defer { BIO_free(bio) }
-
-        data.withUnsafeBytes { ptr in
-            if let base = ptr.baseAddress {
-                BIO_write(bio, base, Int32(ptr.count))
-            }
-        }
-
-        guard let resp = d2i_OCSP_RESPONSE_bio(bio, nil) else {
+        guard let resp = data.withUnsafeBytes({ (ptr: UnsafeRawBufferPointer) -> OpaquePointer? in
+            guard let base = ptr.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return nil }
+            var roPtr = base
+            return d2i_OCSP_RESPONSE(nil, &roPtr, ptr.count)
+        }) else {
             throw NSError(domain: "OCSPClient", code: -1,
                 userInfo: [NSLocalizedDescriptionKey: "Error parsing OCSP response"])
         }
@@ -139,9 +134,9 @@ public class OCSPClient {
 
         let singleResp = OCSP_resp_get0(basicResp, 0)
         var reason: Int32 = -1
-        let revocationTime: OpaquePointer?
-        let thisUpdate: OpaquePointer?
-        let nextUpdate: OpaquePointer?
+        var revocationTime: UnsafeMutablePointer<ASN1_GENERALIZEDTIME>?
+        var thisUpdate: UnsafeMutablePointer<ASN1_GENERALIZEDTIME>?
+        var nextUpdate: UnsafeMutablePointer<ASN1_GENERALIZEDTIME>?
 
         let certStatus = OCSP_single_get0_status(singleResp, &reason, &revocationTime, &thisUpdate, &nextUpdate)
 
@@ -179,7 +174,7 @@ public class OCSPClient {
         // Serialize each ACCESS_DESCRIPTION to DER, scan for IA5String URIs
         let count = Int(OPENSSL_sk_num(aia))
         for i in 0..<count {
-            guard let adRaw = OPENSSL_sk_value(aia, i) else { continue }
+            guard let adRaw = OPENSSL_sk_value(aia, Int32(i)) else { continue }
             let ad = OpaquePointer(adRaw)
 
             var adDER: UnsafeMutablePointer<UInt8>?
