@@ -47,13 +47,12 @@ public class CRLClient {
                 }
                 if let crl = d2i_X509_CRL_bio(bio, nil) {
                     defer { X509_CRL_free(crl) }
-                    let nextUpdate = X509_CRL_get0_nextUpdate(crl)
-                    if nextUpdate != nil {
-                        let now = Date()
-                        if let next = dateFromASN1_TIME(nextUpdate), now < next {
-                            LogManager.info("Usando CRL en caché: \(cacheFile.lastPathComponent)")
-                            return crlData
-                        }
+                    guard let nextUpdate = X509_CRL_get0_nextUpdate(crl) else { break }
+                    let now = Date()
+                    let nextOpaque = OpaquePointer(nextUpdate)
+                    if let next = dateFromASN1_TIME(nextOpaque), now < next {
+                        LogManager.info("Usando CRL en caché: \(cacheFile.lastPathComponent)")
+                        return crlData
                     }
                 }
                 try? FileManager.default.removeItem(at: cacheFile)
@@ -187,27 +186,32 @@ public class CRLClient {
     }
 
     private static func validarAutorizacionFirmaCrl(_ signer: SecCertificate) throws {
-        let keyUsageOID = "2.5.29.15" as CFString
-        guard let values = SecCertificateCopyValues(signer, [keyUsageOID] as CFArray, nil) as? [CFDictionary] else {
+        let signerData = SecCertificateCopyData(signer) as Data
+        let bio = BIO_new(BIO_s_mem())
+        defer { BIO_free(bio) }
+        signerData.withUnsafeBytes { ptr in
+            if let base = ptr.baseAddress {
+                BIO_write(bio, base, Int32(ptr.count))
+            }
+        }
+        guard let x509 = d2i_X509_bio(bio, nil) else {
+            throw NSError(domain: "CRLClient", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Error convirtiendo certificado para keyUsage"])
+        }
+        defer { X509_free(x509) }
+
+        let usage = X509_get_key_usage(x509)
+        if (Int32(usage) & 2) == 0 {
             throw NSError(domain: "CRLClient", code: -1,
                 userInfo: [NSLocalizedDescriptionKey: "El CRL es inválido: no tiene cRLSign"])
-        }
-        for value in values {
-            if let oid = value["key" as CFString] as? String, oid == (keyUsageOID as String) {
-                if let number = value["value" as CFString] as? Int {
-                    if (number & 0x02) == 0 {
-                        throw NSError(domain: "CRLClient", code: -1,
-                            userInfo: [NSLocalizedDescriptionKey: "El CRL es inválido"])
-                    }
-                }
-            }
         }
     }
 
     private static func validarVigenciaCrl(_ crl: OpaquePointer) throws {
         guard let nextUpdate = X509_CRL_get0_nextUpdate(crl) else { return }
         let now = Date()
-        if let next = dateFromASN1_TIME(nextUpdate), now > next {
+        let nextOpaque = OpaquePointer(nextUpdate)
+        if let next = dateFromASN1_TIME(nextOpaque), now > next {
             throw NSError(domain: "CRLClient", code: -1,
                 userInfo: [NSLocalizedDescriptionKey: "El CRL ha expirado."])
         }
@@ -264,27 +268,50 @@ public class CRLClient {
         defer { X509_free(x509) }
 
         var result: [String] = []
-        guard let rawExt = X509_get_ext_d2i(x509, Int(NID_crl_distribution_points), nil, nil) else { return result }
+        guard let rawExt = X509_get_ext_d2i(x509, Int32(NID_crl_distribution_points), nil, nil) else { return result }
         let ext = OpaquePointer(rawExt)
         defer { CRL_DIST_POINTS_free(ext) }
 
-        let count = Int(sk_DIST_POINT_num(ext))
+        // Serialize each DIST_POINT to DER, then scan for IA5String URIs
+        let count = Int(OPENSSL_sk_num(ext))
         for i in 0..<count {
-            guard let dp = sk_DIST_POINT_value(ext, i) else { continue }
-            let dpn = dp.pointee.distpoint
-            if dpn == nil || dpn!.pointee.type != 0 { continue }
-            let names = dpn!.pointee.name.fullname
-            let nameCount = Int(sk_GENERAL_NAME_num(names))
-            for j in 0..<nameCount {
-                guard let gn = sk_GENERAL_NAME_value(names, j) else { continue }
-                if gn.pointee.type == GEN_URI {
-                    var dataPtr: UnsafeMutablePointer<UInt8>?
-                    let len = ASN1_STRING_to_UTF8(&dataPtr, gn.pointee.d.ia5)
-                    if len > 0, let ptr = dataPtr {
-                        let url = String(cString: ptr)
-                        OPENSSL_free(ptr)
-                        result.append(url)
+            guard let dpRaw = OPENSSL_sk_value(ext, i) else { continue }
+            let dp = OpaquePointer(dpRaw)
+            var dpDER: UnsafeMutablePointer<UInt8>?
+            let dpLen = i2d_DIST_POINT(dp, &dpDER)
+            guard dpLen > 0, let dpPtr = dpDER else { continue }
+            let dpData = Data(bytes: dpPtr, count: Int(dpLen))
+            free(dpPtr)
+
+            // Scan DER for IA5String (0x16) URIs
+            var idx = 0
+            while idx < dpData.count {
+                if dpData[idx] == 0x16 {
+                    idx += 1
+                    var uriLen = 0
+                    if idx < dpData.count {
+                        if dpData[idx] < 0x80 {
+                            uriLen = Int(dpData[idx])
+                            idx += 1
+                        } else {
+                            let numBytes = Int(dpData[idx] & 0x7F)
+                            idx += 1
+                            for _ in 0..<numBytes {
+                                guard idx < dpData.count else { break }
+                                uriLen = (uriLen << 8) | Int(dpData[idx])
+                                idx += 1
+                            }
+                        }
                     }
+                    if uriLen > 0, idx + uriLen <= dpData.count {
+                        let strData = dpData[idx..<idx + uriLen]
+                        if let url = String(data: strData, encoding: .ascii), url.hasPrefix("http") {
+                            result.append(url)
+                        }
+                    }
+                    idx += uriLen
+                } else {
+                    idx += 1
                 }
             }
         }
@@ -297,16 +324,20 @@ public class CRLClient {
         let len = ASN1_STRING_to_UTF8(&dataPtr, t)
         guard len > 0, let ptr = dataPtr else { return nil }
         let str = String(cString: ptr)
-        OPENSSL_free(ptr)
+        free(ptr)
 
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        if str.hasSuffix("Z") {
-            formatter.dateFormat = "yyyyMMddHHmmss'Z'"
-            formatter.timeZone = TimeZone(abbreviation: "UTC")
-        } else {
-            formatter.dateFormat = "yyyyMMddHHmmssZ"
+        let dateFormats = ["yyyyMMddHHmmss'Z'", "yyMMddHHmmss'Z'", "yyyyMMddHHmmssZ"]
+        for fmt in dateFormats {
+            formatter.dateFormat = fmt
+            if str.hasSuffix("Z") {
+                formatter.timeZone = TimeZone(abbreviation: "UTC")
+            }
+            if let date = formatter.date(from: str) {
+                return date
+            }
         }
-        return formatter.date(from: str)
+        return nil
     }
 }

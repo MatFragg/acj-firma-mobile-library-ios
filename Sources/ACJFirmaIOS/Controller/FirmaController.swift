@@ -29,10 +29,8 @@ public class FirmaController {
             if certChain.isEmpty {
                 certChain = [cert]
             }
-            let resultado = try? CertValidator.validarCadenaCompleta(chain: certChain, tsl: tsl)
-            if resultado != nil {
-                LogManager.info("Validación TSL completada")
-            }
+            try? CertValidator.validarCadenaCompleta(chain: certChain, tsl: tsl)
+            LogManager.info("Validación TSL completada")
         }
 
         var imageData: Data?
@@ -128,7 +126,7 @@ public class FirmaController {
         let cargoOpt = params.incluirCargo && !cargoStr.isEmpty ? cargoStr : nil
         let empresaOpt = params.incluirEmpresa && !empresaStr.isEmpty ? empresaStr : nil
 
-        var originalHeight = params.height
+        let originalHeight = params.height
         let alturaCalculada = ImageWriter.calcularAlturaRequerida(
             nombre: nombre,
             ruc: !ruc.isEmpty ? ruc : nil,

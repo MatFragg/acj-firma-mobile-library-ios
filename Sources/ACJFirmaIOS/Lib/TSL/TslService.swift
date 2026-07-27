@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import os
 
 public enum TslContext {
     case production
@@ -8,7 +9,7 @@ public enum TslContext {
 
 public class TslService {
     private static var instance: TslService?
-    private static let lock = NSLock()
+    private static let lockQueue = DispatchQueue(label: "com.acj.firma.tsl", qos: .userInitiated)
 
     private var certificates: [SecCertificate] = []
     private var errorMessage: String?
@@ -17,23 +18,28 @@ public class TslService {
     private var isValid: Bool = false
 
     public static func getInstance(context: TslContext = .production) async throws -> TslService {
-        lock.lock()
-        defer { lock.unlock() }
-
-        if let existing = instance, existing.isValid {
-            return existing
+        try await withCheckedThrowingContinuation { continuation in
+            lockQueue.sync {
+                if let existing = instance, existing.isValid {
+                    continuation.resume(returning: existing)
+                    return
+                }
+            }
+            Task {
+                let service = TslService()
+                do {
+                    try await service.cargarTsl(context: context)
+                    lockQueue.sync { instance = service }
+                    continuation.resume(returning: service)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
         }
-
-        let service = TslService()
-        try await service.cargarTsl(context: context)
-        instance = service
-        return service
     }
 
     public static func resetInstance() {
-        lock.lock()
-        defer { lock.unlock() }
-        instance = nil
+        lockQueue.sync { instance = nil }
     }
 
     private func cargarTsl(context: TslContext) async throws {

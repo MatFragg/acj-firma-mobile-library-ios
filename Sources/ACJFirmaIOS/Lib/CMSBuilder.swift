@@ -33,17 +33,9 @@ public class CMSBuilder {
         }
         defer { PKCS7_free(p7) }
 
-        var chainStack: OpaquePointer?
         for i in 0..<chain.count {
             let x = try secCertificateToX509(chain[i])
-            if chainStack == nil {
-                chainStack = sk_X509_new_null()
-            }
-            sk_X509_push(chainStack, x)
-        }
-
-        if let sk = chainStack {
-            PKCS7_set_certs(p7, sk)
+            PKCS7_add_certificate(p7, x)
         }
 
         var out: UnsafeMutablePointer<UInt8>?
@@ -54,7 +46,7 @@ public class CMSBuilder {
         }
 
         let result = Data(bytes: outPtr, count: Int(len))
-        OPENSSL_free(out)
+        free(outPtr)
         return result
     }
 
@@ -81,7 +73,7 @@ public class CMSBuilder {
         }
 
         let pkey = EVP_PKEY_new()
-        EVP_PKEY_assign_RSA(pkey, rsaKey)
+        EVP_PKEY_assign(pkey, EVP_PKEY_RSA, rsaKey)
         return pkey!
     }
 
@@ -163,11 +155,17 @@ public class CMSBuilder {
                 userInfo: [NSLocalizedDescriptionKey: "No se encontraron firmantes en PKCS7"])
         }
 
-        guard sk_PKCS7_SIGNER_INFO_num(signerInfoStack) > 0,
-              let signerInfo = sk_PKCS7_SIGNER_INFO_value(signerInfoStack, 0) else {
+        let signerCount = OPENSSL_sk_num(signerInfoStack)
+        guard signerCount > 0 else {
             throw NSError(domain: "CMSBuilder", code: -1,
                 userInfo: [NSLocalizedDescriptionKey: "No hay firmantes en PKCS7"])
         }
+
+        guard let rawSI = OPENSSL_sk_value(signerInfoStack, 0) else {
+            throw NSError(domain: "CMSBuilder", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Error obteniendo firmante"])
+        }
+        let signerInfo = OpaquePointer(rawSI)
 
         let contentHash = SignHelpers.sha256(data: signedContent)
         let tsaToken = try TSAClient.requestTimestamp(contentHash: contentHash, tsaUrl: tsaUrl)
@@ -175,7 +173,6 @@ public class CMSBuilder {
         let tsaOID = "1.2.840.113549.1.9.16.2.14"
         let tsaNid = OBJ_txt2nid(tsaOID)
 
-        // Build DER-encoded PKCS7 from the TSA token bytes
         let tsaBio = BIO_new(BIO_s_mem())
         defer { BIO_free(tsaBio) }
 
@@ -199,9 +196,8 @@ public class CMSBuilder {
         }
 
         let tsDer = Data(bytes: tsPtr, count: Int(tsLen))
-        OPENSSL_free(tsOut)
+        free(tsPtr)
 
-        // Add the timestamp token as unsigned attribute via PKCS7_add_attrib
         let addResult = tsDer.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) -> Int32 in
             guard let base = ptr.baseAddress else { return 0 }
             return PKCS7_add_attrib(signerInfo, tsaNid, V_ASN1_OCTET_STRING,
@@ -221,7 +217,7 @@ public class CMSBuilder {
         }
 
         let result = Data(bytes: outPtr, count: Int(len))
-        OPENSSL_free(out)
+        free(outPtr)
         return result
     }
 }

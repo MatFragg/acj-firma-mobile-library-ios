@@ -75,7 +75,7 @@ public class TSAClient {
                 userInfo: [NSLocalizedDescriptionKey: "Error codificando TimeStampReq"])
         }
         let result = Data(bytes: outPtr, count: Int(len))
-        OPENSSL_free(out)
+        free(out)
         return result
     }
 
@@ -115,7 +115,7 @@ public class TSAClient {
                 userInfo: [NSLocalizedDescriptionKey: "Error codificando TimeStampToken"])
         }
         let result = Data(bytes: outPtr, count: Int(len))
-        OPENSSL_free(out)
+        free(out)
         return result
     }
 }

@@ -52,12 +52,7 @@ public class ValidacionController {
 
         var resultados: [ResultadoFirma] = []
 
-        guard let pdfDocRef = document.documentRef else {
-            return ResultadoValidacion(documentoValido: false, firmas: [],
-                mensajeError: "No se pudo acceder al documento PDF")
-        }
-
-        let signatures = extractSignatures(from: pdfDocRef)
+        let signatures = extractSignatures(from: pdfData)
         if signatures.isEmpty {
             return ResultadoValidacion(documentoValido: false, firmas: [],
                 mensajeError: "El documento no contiene firmas.")
@@ -95,79 +90,51 @@ public class ValidacionController {
         return ResultadoValidacion(documentoValido: todoValido, firmas: resultados, mensajeError: "")
     }
 
-    private static func extractSignatures(from documentRef: CGPDFDocument) -> [(String?, String?, String?, Date?)] {
+    private static func extractSignatures(from pdfData: Data) -> [(String?, String?, String?, Date?)] {
+        guard let pdfString = String(data: pdfData, encoding: .ascii) else { return [] }
         var signatures: [(String?, String?, String?, Date?)] = []
 
-        for pageNum in 1...documentRef.numberOfPages {
-            guard let page = documentRef.page(at: pageNum) else { continue }
-            guard let dict = page.dictionary else { continue }
-
-            var annots: CGPDFObjectRef?
-            guard CGPDFDictionaryGetObject(dict, "Annots", &annots) else { continue }
-
-            let annotsArray = annots
-            if let array = annotsArray {
-                for i in 0..<CGPDFArrayGetCount(array) {
-                    var annot: CGPDFObjectRef?
-                    guard CGPDFArrayGetObject(array, i, &annot) else { continue }
-
-                    var annotDict: CGPDFDictionaryRef?
-                    guard CGPDFObjectGetValue(annot, .dictionary, &annotDict) else { continue }
-
-                    var subtype: UnsafeMutablePointer<Int8>?
-                    guard CGPDFDictionaryGetName(annotDict, "Subtype", &subtype),
-                          String(cString: subtype!) == "Widget" else { continue }
-
-                    var ft: UnsafeMutablePointer<Int8>?
-                    guard CGPDFDictionaryGetName(annotDict, "FT", &ft),
-                          String(cString: ft!) == "Sig" else { continue }
-
-                    var name: UnsafeMutablePointer<Int8>?
-                    CGPDFDictionaryGetName(annotDict, "Name", &name)
-
-                    var reason: UnsafeMutablePointer<Int8>?
-                    CGPDFDictionaryGetName(annotDict, "Reason", &reason)
-
-                    var location: UnsafeMutablePointer<Int8>?
-                    CGPDFDictionaryGetName(annotDict, "Location", &location)
-
-                    let nameStr = name.map { String(cString: $0) }
-                    let reasonStr = reason.map { String(cString: $0) }
-                    let locationStr = location.map { String(cString: $0) }
-
-                    signatures.append((nameStr, reasonStr, locationStr, nil))
-                }
-            }
-        }
-        return signatures
-    }
-
-    private static func extractSignaturesOld(from pdfData: Data) -> [(name: String, reason: String, location: String)] {
-        guard let pdfString = String(data: pdfData, encoding: .ascii) else { return [] }
-        var results: [(String, String, String)] = []
-
+        let sigPattern = "/Type\\s*/Sig[^>]*>>"
         let namePattern = "/Name\\s*\\(([^)]*)\\)"
         let reasonPattern = "/Reason\\s*\\(([^)]*)\\)"
         let locationPattern = "/Location\\s*\\(([^)]*)\\)"
 
-        if let nameRegex = try? NSRegularExpression(pattern: namePattern),
-           let reasonRegex = try? NSRegularExpression(pattern: reasonPattern),
-           let locationRegex = try? NSRegularExpression(pattern: locationPattern) {
-
-            let nsString = pdfString as NSString
-            let nameMatches = nameRegex.matches(in: pdfString, range: NSRange(location: 0, length: nsString.length))
-            let reasonMatches = reasonRegex.matches(in: pdfString, range: NSRange(location: 0, length: nsString.length))
-            let locationMatches = locationRegex.matches(in: pdfString, range: NSRange(location: 0, length: nsString.length))
-
-            let count = max(nameMatches.count, max(reasonMatches.count, locationMatches.count))
-            for i in 0..<count {
-                let name = i < nameMatches.count ? nsString.substring(with: nameMatches[i].range(at: 1)) : ""
-                let reason = i < reasonMatches.count ? nsString.substring(with: reasonMatches[i].range(at: 1)) : ""
-                let location = i < locationMatches.count ? nsString.substring(with: locationMatches[i].range(at: 1)) : ""
-                results.append((name, reason, location))
-            }
+        guard let sigRegex = try? NSRegularExpression(pattern: sigPattern, options: [.dotMatchesLineSeparators]),
+              let nameRegex = try? NSRegularExpression(pattern: namePattern),
+              let reasonRegex = try? NSRegularExpression(pattern: reasonPattern),
+              let locationRegex = try? NSRegularExpression(pattern: locationPattern) else {
+            return signatures
         }
-        return results
+
+        let nsString = pdfString as NSString
+        let sigMatches = sigRegex.matches(in: pdfString, range: NSRange(location: 0, length: nsString.length))
+
+        for sigMatch in sigMatches {
+            let sigBlock = nsString.substring(with: sigMatch.range)
+            let nsBlock = sigBlock as NSString
+
+            let name: String? = {
+                if let m = nameRegex.firstMatch(in: sigBlock, range: NSRange(location: 0, length: nsBlock.length)) {
+                    return nsBlock.substring(with: m.range(at: 1))
+                }
+                return nil
+            }()
+            let reason: String? = {
+                if let m = reasonRegex.firstMatch(in: sigBlock, range: NSRange(location: 0, length: nsBlock.length)) {
+                    return nsBlock.substring(with: m.range(at: 1))
+                }
+                return nil
+            }()
+            let location: String? = {
+                if let m = locationRegex.firstMatch(in: sigBlock, range: NSRange(location: 0, length: nsBlock.length)) {
+                    return nsBlock.substring(with: m.range(at: 1))
+                }
+                return nil
+            }()
+
+            signatures.append((name, reason, location, nil))
+        }
+        return signatures
     }
 
     private static func extraerByteRange(pdfData: Data) throws -> [Int] {
@@ -260,31 +227,22 @@ public class ValidacionController {
         }
         defer { PKCS7_free(p7) }
 
-        let sign = PKCS7_get_signature(p7)
-        guard let signPtr = sign else {
-            return ResultadoFirma(valida: false, nombreFirmante: nombreFirmante ?? "Desconocido",
-                motivo: motivo, location: location, fechaFirma: fechaFirma,
-                mensajeError: "No se encontraron firmantes en CMS")
-        }
-        defer { PKCS7_SIGNER_INFO_free(signPtr) }
-
-        let certs = PKCS7_get_certs(p7)
-        guard let stack = certs else {
+        guard let certStack = PKCS7_get0_signers(p7, nil, 0) else {
             return ResultadoFirma(valida: false, nombreFirmante: nombreFirmante ?? "Desconocido",
                 motivo: motivo, location: location, fechaFirma: fechaFirma,
                 mensajeError: "No se encontraron certificados en CMS")
         }
-        defer { sk_X509_pop_free(stack) { X509_free($0) } }
 
-        let certCount = sk_X509_num(stack)
+        let certCount = OPENSSL_sk_num(certStack)
         var certChain: [SecCertificate] = []
         for i in 0..<certCount {
-            guard let x509 = sk_X509_value(stack, i) else { continue }
+            guard let raw = OPENSSL_sk_value(certStack, i) else { continue }
+            let x509 = OpaquePointer(raw)
             var out: UnsafeMutablePointer<UInt8>?
             let len = i2d_X509(x509, &out)
             if len > 0, let outPtr = out {
                 let certData = Data(bytes: outPtr, count: Int(len))
-                OPENSSL_free(out)
+                free(outPtr)
                 if let secCert = SecCertificateCreateWithData(nil, certData as CFData) {
                     certChain.append(secCert)
                 }

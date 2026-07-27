@@ -17,26 +17,31 @@ public class CertValidator {
             throw NSError(domain: "CertValidator", code: -1,
                 userInfo: [NSLocalizedDescriptionKey: "Certificado no disponible"])
         }
-        guard let values = SecCertificateCopyValues(c, [keyUsageOID] as CFArray, nil) as? [CFDictionary] else {
-            throw NSError(domain: "CertValidator", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "No se pudo leer KeyUsage"])
-        }
-        for value in values {
-            if let oid = value["key" as CFString] as? String, oid == (keyUsageOID as String) {
-                if let number = value["value" as CFString] as? Int {
-                    let digitalSignature = (number & 0x80) != 0
-                    let nonRepudiation = (number & 0x40) != 0
-                    let keyEncipherment = (number & 0x20) != 0
-                    if !digitalSignature, !nonRepudiation {
-                        throw NSError(domain: "CertValidator", code: -1,
-                            userInfo: [NSLocalizedDescriptionKey: "El certificado no tiene KeyUsage digitalSignature ni nonRepudiation"])
-                    }
-                    if keyEncipherment {
-                        throw NSError(domain: "CertValidator", code: -1,
-                            userInfo: [NSLocalizedDescriptionKey: "El certificado tiene KeyUsage keyEncipherment"])
-                    }
-                }
+        let certData = SecCertificateCopyData(c) as Data
+        let bio = BIO_new(BIO_s_mem())
+        defer { BIO_free(bio) }
+        certData.withUnsafeBytes { ptr in
+            if let base = ptr.baseAddress {
+                BIO_write(bio, base, Int32(ptr.count))
             }
+        }
+        guard let x509 = d2i_X509_bio(bio, nil) else {
+            throw NSError(domain: "CertValidator", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "No se pudo leer certificado para validar usos"])
+        }
+        defer { X509_free(x509) }
+
+        let usage = X509_get_key_usage(x509)
+        let digitalSignature = (usage & 0x80) != 0
+        let nonRepudiation = (usage & 0x40) != 0
+        let keyEncipherment = (usage & 0x20) != 0
+        if !digitalSignature, !nonRepudiation {
+            throw NSError(domain: "CertValidator", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "El certificado no tiene KeyUsage digitalSignature ni nonRepudiation"])
+        }
+        if keyEncipherment {
+            throw NSError(domain: "CertValidator", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "El certificado tiene KeyUsage keyEncipherment"])
         }
     }
 
@@ -68,7 +73,7 @@ public class CertValidator {
         defer { X509_free(x509) }
 
         guard let notAfter = X509_get0_notAfter(x509) else { return nil }
-        return dateFromASN1_TIME(notAfter)
+        return dateFromASN1_TIME(OpaquePointer(notAfter))
     }
 
     private static func dateFromASN1_TIME(_ time: OpaquePointer?) -> Date? {
@@ -77,21 +82,21 @@ public class CertValidator {
         let len = ASN1_STRING_to_UTF8(&dataPtr, t)
         guard len > 0, let ptr = dataPtr else { return nil }
         let str = String(cString: ptr)
-        OPENSSL_free(ptr)
+        free(ptr)
 
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        if str.hasSuffix("Z") {
-            formatter.dateFormat = "yyMMddHHmmss'Z'"
-            formatter.timeZone = TimeZone(abbreviation: "UTC")
-            if let date = formatter.date(from: str) { return date }
-            formatter.dateFormat = "yyyyMMddHHmmss'Z'"
-            if let date = formatter.date(from: str) { return date }
+        let dateFormats = ["yyyyMMddHHmmss'Z'", "yyMMddHHmmss'Z'", "yyyyMMddHHmmssZ", "yyMMddHHmmssZ"]
+        for fmt in dateFormats {
+            formatter.dateFormat = fmt
+            if str.hasSuffix("Z") {
+                formatter.timeZone = TimeZone(abbreviation: "UTC")
+            }
+            if let date = formatter.date(from: str) {
+                return date
+            }
         }
-        formatter.dateFormat = "yyMMddHHmmssZ"
-        if let date = formatter.date(from: str) { return date }
-        formatter.dateFormat = "yyyyMMddHHmmssZ"
-        return formatter.date(from: str)
+        return nil
     }
 
     public static func validarConfianzaYRevocacion(_ chain: [SecCertificate], tsl: TslService) throws {
@@ -220,7 +225,7 @@ public class CertValidator {
         let len = X509_NAME_oneline(subject, &out, 0)
         guard len > 0, let ptr = out else { return "" }
         let result = String(cString: ptr)
-        OPENSSL_free(ptr)
+        free(ptr)
         return result
     }
 
@@ -243,7 +248,7 @@ public class CertValidator {
         let len = X509_NAME_oneline(issuer, &out, 0)
         guard len > 0, let ptr = out else { return "" }
         let result = String(cString: ptr)
-        OPENSSL_free(ptr)
+        free(ptr)
         return result
     }
 
@@ -309,23 +314,51 @@ public class CertValidator {
         guard let x509 = d2i_X509_bio(bio, nil) else { return nil }
         defer { X509_free(x509) }
 
-        guard let rawAIA = X509_get_ext_d2i(x509, Int(NID_info_access), nil, nil) else { return nil }
+        guard let rawAIA = X509_get_ext_d2i(x509, Int32(NID_info_access), nil, nil) else { return nil }
         let aia = OpaquePointer(rawAIA)
         defer { AUTHORITY_INFO_ACCESS_free(aia) }
 
-        let count = Int(sk_ACCESS_DESCRIPTION_num(aia))
+        let count = Int(OPENSSL_sk_num(aia))
         for i in 0..<count {
-            guard let ad = sk_ACCESS_DESCRIPTION_value(aia, i) else { continue }
-            if OBJ_obj2nid(ad.pointee.method) == NID_ad_CA_ISSUERS {
-                let gn = ad.pointee.location
-                if gn.pointee.type == GEN_URI {
-                    var dataPtr: UnsafeMutablePointer<UInt8>?
-                    let len = ASN1_STRING_to_UTF8(&dataPtr, gn.pointee.d.ia5)
-                    if len > 0, let ptr = dataPtr {
-                        let url = String(cString: ptr)
-                        OPENSSL_free(ptr)
-                        return url
+            guard let adRaw = OPENSSL_sk_value(aia, i) else { continue }
+            let ad = OpaquePointer(adRaw)
+
+            // Serialize ACCESS_DESCRIPTION to DER, scan for IA5String URIs
+            var adDER: UnsafeMutablePointer<UInt8>?
+            let adLen = i2d_ACCESS_DESCRIPTION(ad, &adDER)
+            guard adLen > 0, let adPtr = adDER else { continue }
+            let adData = Data(bytes: adPtr, count: Int(adLen))
+            free(adPtr)
+
+            // Scan DER for IA5String (0x16) URIs
+            var idx = 0
+            while idx < adData.count {
+                if adData[idx] == 0x16 {
+                    idx += 1
+                    var uriLen = 0
+                    if idx < adData.count {
+                        if adData[idx] < 0x80 {
+                            uriLen = Int(adData[idx])
+                            idx += 1
+                        } else {
+                            let numBytes = Int(adData[idx] & 0x7F)
+                            idx += 1
+                            for _ in 0..<numBytes {
+                                guard idx < adData.count else { break }
+                                uriLen = (uriLen << 8) | Int(adData[idx])
+                                idx += 1
+                            }
+                        }
                     }
+                    if uriLen > 0, idx + uriLen <= adData.count {
+                        let strData = adData[idx..<idx + uriLen]
+                        if let url = String(data: strData, encoding: .ascii), url.hasPrefix("http") {
+                            return url
+                        }
+                    }
+                    idx += uriLen
+                } else {
+                    idx += 1
                 }
             }
         }
