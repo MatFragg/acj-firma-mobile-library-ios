@@ -18,26 +18,26 @@ public class Common {
     }
 
     public var tslUrl: String {
-        get("app.url.tsl") ?? "https://iofe.indecopi.gob.pe/TSL/tsl-pe.xml"
+        self.get("app.url.tsl") ?? "https://iofe.indecopi.gob.pe/TSL/tsl-pe.xml"
     }
 
     public var tslAlternativeUrl: String {
-        get("app.url.tsl.alterno") ?? tslUrl
+        self.get("app.url.tsl.alterno") ?? tslUrl
     }
 
     public var tsaUrl: String? {
-        get("app.url.tsa")
+        self.get("app.url.tsa")
     }
 
     public var tsaAlternativeUrl: String? {
-        get("app.url.tsa.alterno")
+        self.get("app.url.tsa.alterno")
     }
 
     public var tsaUser: String? {
-        get("app.tsa.user")
+        self.get("app.tsa.user")
     }
 
     public var tsaPassword: String? {
-        get("app.tsa.password")
+        self.get("app.tsa.password")
     }
 }
