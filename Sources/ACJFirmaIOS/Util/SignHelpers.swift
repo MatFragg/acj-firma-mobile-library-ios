@@ -31,32 +31,18 @@ public class SignHelpers {
     }
 
     public static func nonRepudiation(_ cert: SecCertificate) -> Bool {
-        guard let keyUsage = copyKeyUsage(cert) else { return false }
-        return keyUsage.count > 1 && keyUsage[1]
-    }
-
-    private static func copyKeyUsage(_ cert: SecCertificate) -> [Bool]? {
-        let keyUsageOID = "2.5.29.15" as CFString
-        guard let values = SecCertificateCopyValues(cert, [keyUsageOID] as CFArray, nil) as? [CFDictionary] else {
-            return nil
-        }
-        for value in values {
-            if let oid = value["key" as CFString] as? String, oid == (keyUsageOID as String) {
-                if let number = value["value" as CFString] as? Int {
-                    return [
-                        (number & 0x80) != 0,
-                        (number & 0x40) != 0,
-                        (number & 0x20) != 0,
-                        (number & 0x10) != 0,
-                        (number & 0x08) != 0,
-                        (number & 0x04) != 0,
-                        (number & 0x02) != 0,
-                        (number & 0x01) != 0,
-                    ]
-                }
+        let certData = SecCertificateCopyData(cert) as Data
+        let bio = BIO_new(BIO_s_mem())
+        defer { BIO_free(bio) }
+        certData.withUnsafeBytes { ptr in
+            if let base = ptr.baseAddress {
+                BIO_write(bio, base, Int32(ptr.count))
             }
         }
-        return nil
+        guard let x509 = d2i_X509_bio(bio, nil) else { return false }
+        defer { X509_free(x509) }
+        let usage = X509_get_key_usage(x509)
+        return (usage & 0x40) != 0
     }
 
     public static func formatDateFull(_ fecha: Date) -> String {

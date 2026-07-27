@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import OpenSSL
 
 public class KeychainManager {
 
@@ -29,18 +30,18 @@ public class KeychainManager {
     }
 
     private static func nonRepudiation(_ cert: SecCertificate) -> Bool {
-        let keyUsageOID = "2.5.29.15" as CFString
-        guard let values = SecCertificateCopyValues(cert, [keyUsageOID] as CFArray, nil) as? [CFDictionary] else {
-            return false
-        }
-        for value in values {
-            if let oid = value["key" as CFString] as? String, oid == (keyUsageOID as String) {
-                if let number = value["value" as CFString] as? Int {
-                    return (number & 0x40) != 0
-                }
+        let certData = SecCertificateCopyData(cert) as Data
+        let bio = BIO_new(BIO_s_mem())
+        defer { BIO_free(bio) }
+        certData.withUnsafeBytes { ptr in
+            if let base = ptr.baseAddress {
+                BIO_write(bio, base, Int32(ptr.count))
             }
         }
-        return false
+        guard let x509 = d2i_X509_bio(bio, nil) else { return false }
+        defer { X509_free(x509) }
+        let usage = X509_get_key_usage(x509)
+        return (usage & 0x40) != 0
     }
 
     public static func getPrivateKey(alias: String) throws -> SecKey {
@@ -52,11 +53,12 @@ public class KeychainManager {
         ]
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let key = result as? SecKey else {
+        guard status == errSecSuccess, let result = result,
+              CFGetTypeID(result) == SecKeyGetTypeID() else {
             throw NSError(domain: "ACJFirma", code: -1,
                 userInfo: [NSLocalizedDescriptionKey: "No se encontró clave privada para alias: \(alias)"])
         }
-        return key
+        return result as! SecKey
     }
 
     public static func getCertificate(alias: String) throws -> SecCertificate {
@@ -67,11 +69,12 @@ public class KeychainManager {
         ]
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let cert = result as? SecCertificate else {
+        guard status == errSecSuccess, let result = result,
+              CFGetTypeID(result) == SecCertificateGetTypeID() else {
             throw NSError(domain: "ACJFirma", code: -1,
                 userInfo: [NSLocalizedDescriptionKey: "No se encontró certificado para alias: \(alias)"])
         }
-        return cert
+        return result as! SecCertificate
     }
 
     public static func getCertificateChain(alias: String) throws -> [SecCertificate] {
@@ -82,9 +85,11 @@ public class KeychainManager {
         ]
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let identity = result as? SecIdentity else {
+        guard status == errSecSuccess, let result = result,
+              CFGetTypeID(result) == SecIdentityGetTypeID() else {
             return [try getCertificate(alias: alias)]
         }
+        let identity = result as! SecIdentity
         var cert: SecCertificate?
         SecIdentityCopyCertificate(identity, &cert)
         var chain = [SecCertificate]()
@@ -95,9 +100,8 @@ public class KeychainManager {
         var trust: SecTrust?
         SecTrustCreateWithCertificates(chain as CFArray, policy, &trust)
         if let t = trust {
-            let count = SecTrustGetCertificateCount(t)
-            for i in 0..<count {
-                if let c = SecTrustGetCertificateAtIndex(t, i) {
+            if let certs = SecTrustCopyCertificateChain(t) as? [SecCertificate] {
+                for c in certs {
                     if !chain.contains(where: { CFEqual($0, c) }) {
                         chain.append(c)
                     }
@@ -117,7 +121,9 @@ public class KeychainManager {
             throw NSError(domain: "ACJFirma", code: -1,
                 userInfo: [NSLocalizedDescriptionKey: "Error importando PKCS#12"])
         }
-        if let identity = first[kSecImportItemIdentity as String] as? SecIdentity {
+        if let rawIdentity = first[kSecImportItemIdentity as String],
+           CFGetTypeID(rawIdentity as AnyObject) == SecIdentityGetTypeID() {
+            let identity = rawIdentity as! SecIdentity
             var cert: SecCertificate?
             SecIdentityCopyCertificate(identity, &cert)
             if let c = cert, let label = SecCertificateCopySubjectSummary(c) as String? {
