@@ -139,9 +139,9 @@ public class OCSPClient {
 
         let singleResp = OCSP_resp_get0(basicResp, 0)
         var reason: Int32 = -1
-        let revocationTime: UnsafeMutablePointer<ASN1_GENERALIZEDTIME>?
-        let thisUpdate: UnsafeMutablePointer<ASN1_GENERALIZEDTIME>?
-        let nextUpdate: UnsafeMutablePointer<ASN1_GENERALIZEDTIME>?
+        let revocationTime: OpaquePointer?
+        let thisUpdate: OpaquePointer?
+        let nextUpdate: OpaquePointer?
 
         let certStatus = OCSP_single_get0_status(singleResp, &reason, &revocationTime, &thisUpdate, &nextUpdate)
 

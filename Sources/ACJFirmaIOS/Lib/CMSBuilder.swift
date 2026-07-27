@@ -33,7 +33,7 @@ public class CMSBuilder {
         }
         defer { PKCS7_free(p7) }
 
-        var chainStack: UnsafeMutablePointer<stack_st_X509>?
+        var chainStack: OpaquePointer?
         for i in 0..<chain.count {
             let x = try secCertificateToX509(chain[i])
             if chainStack == nil {
@@ -58,7 +58,7 @@ public class CMSBuilder {
         return result
     }
 
-    private static func secKeyToEVP_PKEY(_ key: SecKey) throws -> UnsafeMutablePointer<EVP_PKEY> {
+    private static func secKeyToEVP_PKEY(_ key: SecKey) throws -> OpaquePointer {
         var error: Unmanaged<CFError>?
         guard let data = SecKeyCopyExternalRepresentation(key, &error) as Data? else {
             throw error?.takeRetainedValue() ?? NSError(domain: "CMSBuilder", code: -1,
@@ -85,7 +85,7 @@ public class CMSBuilder {
         return pkey!
     }
 
-    private static func secCertificateToX509(_ cert: SecCertificate) throws -> UnsafeMutablePointer<X509> {
+    private static func secCertificateToX509(_ cert: SecCertificate) throws -> OpaquePointer {
         let data = SecCertificateCopyData(cert) as Data
         let bio = BIO_new(BIO_s_mem())
         defer { BIO_free(bio) }

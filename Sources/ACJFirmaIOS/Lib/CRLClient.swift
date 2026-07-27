@@ -95,7 +95,7 @@ public class CRLClient {
         return data
     }
 
-    private static func parseCrl(_ data: Data) throws -> UnsafeMutablePointer<X509_CRL> {
+    private static func parseCrl(_ data: Data) throws -> OpaquePointer {
         let bio = BIO_new(BIO_s_mem())
         defer { BIO_free(bio) }
 
@@ -112,7 +112,7 @@ public class CRLClient {
         return crl
     }
 
-    private static func buscarFirmanteCrl(crl: UnsafeMutablePointer<X509_CRL>, issuer: SecCertificate, tsl: TslService, chain: [SecCertificate]) throws -> SecCertificate {
+    private static func buscarFirmanteCrl(crl: OpaquePointer, issuer: SecCertificate, tsl: TslService, chain: [SecCertificate]) throws -> SecCertificate {
         let issuerData = SecCertificateCopyData(issuer) as Data
         let issuerBio = BIO_new(BIO_s_mem())
         defer { BIO_free(issuerBio) }
@@ -172,7 +172,7 @@ public class CRLClient {
             userInfo: [NSLocalizedDescriptionKey: "El estado de revocación no pudo ser verificado"])
     }
 
-    private static func verificarFirmaCrl(crl: UnsafeMutablePointer<X509_CRL>, issuer: UnsafeMutablePointer<X509>) -> Bool {
+    private static func verificarFirmaCrl(crl: OpaquePointer, issuer: OpaquePointer) -> Bool {
         let store = X509_STORE_new()
         defer { X509_STORE_free(store) }
 
@@ -204,7 +204,7 @@ public class CRLClient {
         }
     }
 
-    private static func validarVigenciaCrl(_ crl: UnsafeMutablePointer<X509_CRL>) throws {
+    private static func validarVigenciaCrl(_ crl: OpaquePointer) throws {
         guard let nextUpdate = X509_CRL_get0_nextUpdate(crl) else { return }
         let now = Date()
         if let next = dateFromASN1_TIME(nextUpdate), now > next {
@@ -213,7 +213,7 @@ public class CRLClient {
         }
     }
 
-    private static func comprobarRevocacion(crl: UnsafeMutablePointer<X509_CRL>, cert: SecCertificate) throws {
+    private static func comprobarRevocacion(crl: OpaquePointer, cert: SecCertificate) throws {
         let certData = SecCertificateCopyData(cert) as Data
         let certBio = BIO_new(BIO_s_mem())
         defer { BIO_free(certBio) }
@@ -229,7 +229,7 @@ public class CRLClient {
         }
         defer { X509_free(x509) }
 
-        var revoked: UnsafeMutablePointer<X509_REVOKED>?
+        var revoked: OpaquePointer?
         let result = X509_CRL_get0_by_cert(crl, &revoked, x509)
         if result == 1 {
             var cn: CFString?
@@ -291,7 +291,7 @@ public class CRLClient {
         return result
     }
 
-    private static func dateFromASN1_TIME(_ time: UnsafeMutablePointer<ASN1_TIME>?) -> Date? {
+    private static func dateFromASN1_TIME(_ time: OpaquePointer?) -> Date? {
         guard let t = time else { return nil }
         var dataPtr: UnsafeMutablePointer<UInt8>?
         let len = ASN1_STRING_to_UTF8(&dataPtr, t)

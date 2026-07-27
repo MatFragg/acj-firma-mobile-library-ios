@@ -71,7 +71,7 @@ public class CertValidator {
         return dateFromASN1_TIME(notAfter)
     }
 
-    private static func dateFromASN1_TIME(_ time: UnsafePointer<ASN1_TIME>?) -> Date? {
+    private static func dateFromASN1_TIME(_ time: OpaquePointer?) -> Date? {
         guard let t = time else { return nil }
         var dataPtr: UnsafeMutablePointer<UInt8>?
         let len = ASN1_STRING_to_UTF8(&dataPtr, t)
